@@ -36,7 +36,7 @@ jobs:
           if [ -z "$SCHEME" ]; then SCHEME="AppModule"; fi
           echo "正在构建 Scheme: $SCHEME"
 
-          # 1. 编译生成二进制与资源包
+          # 1. 编译
           xcodebuild build \
             -scheme "$SCHEME" \
             -destination "generic/platform=iOS" \
@@ -48,35 +48,38 @@ jobs:
             ASSETCATALOG_COMPILER_GENERATE_ASSET_SYMBOLS=NO \
             ASSETCATALOG_COMPILER_GENERATE_SWIFT_ASSET_SYMBOL_EXTENSIONS=NO
 
-          # 2. 定位编译产物目录
-          PRODUCTS_DIR=$(find ./build -type d -name "Release-iphoneos" | head -n 1)
-          echo "产物目录: $PRODUCTS_DIR"
+          # 2. 精准定位 Products 成品目录（避开 Intermediates 缓存夹）
+          PRODUCTS_DIR=$(find ./build -type d -path "*/Build/Products/Release-iphoneos" | head -n 1)
+          if [ -z "$PRODUCTS_DIR" ]; then
+            PRODUCTS_DIR="./build/Build/Products/Release-iphoneos"
+          fi
+          echo "✅ 最终成品目录: $PRODUCTS_DIR"
 
           # 3. 创建标准 iOS .app 目录结构
           mkdir -p Payload/YouDao.app
 
-          # (1) 装配主执行程序二进制文件
+          # (1) 装配主程序二进制文件
           APP_BIN=$(find "$PRODUCTS_DIR" -maxdepth 1 -type f ! -name "*.*" ! -name ".*" | head -n 1)
           if [ -z "$APP_BIN" ]; then
             APP_BIN="$PRODUCTS_DIR/幼刀"
           fi
-          echo "装配主程序: $APP_BIN"
+          echo "✅ 找到主程序: $APP_BIN"
           cp "$APP_BIN" Payload/YouDao.app/YouDao
           chmod +x Payload/YouDao.app/YouDao
 
-          # (2) 装配所有资源包文件 (图片、资产、字体等)
-          find "$PRODUCTS_DIR" -type d -name "*.bundle" | while read -r bndl; do
-            echo "合并资源包: $bndl"
+          # (2) 合并所有资源包与字体图标
+          find "$PRODUCTS_DIR" -maxdepth 1 -type d -name "*.bundle" | while read -r bndl; do
+            echo "✅ 合并资源包: $bndl"
             cp -R "$bndl/"* Payload/YouDao.app/
           done
 
-          # (3) 装配第三方依赖库 (如果有)
+          # (3) 合并动态依赖库 (如果有)
           if [ -d "$PRODUCTS_DIR/PackageFrameworks" ]; then
             mkdir -p Payload/YouDao.app/Frameworks
             cp -R "$PRODUCTS_DIR/PackageFrameworks/"* Payload/YouDao.app/Frameworks/
           fi
 
-          # 4. 注入标准 Info.plist
+          # 4. 补齐并更新标准 Info.plist
           PLIST_PATH="Payload/YouDao.app/Info.plist"
           if [ ! -f "$PLIST_PATH" ]; then
             plutil -create xml1 "$PLIST_PATH"
@@ -93,7 +96,7 @@ jobs:
           # 5. 打包生成 IPA
           zip -qry output.ipa Payload
           mv output.ipa "$GITHUB_WORKSPACE/YouDao.ipa"
-          echo "🎉 YouDao.ipa 装配打包彻底完成！"
+          echo "🎉 YouDao.ipa 制作成功！"
 
       - name: 发布 Release 并提供 IPA 下载
         uses: softprops/action-gh-release@v2
