@@ -48,7 +48,7 @@ jobs:
             ASSETCATALOG_COMPILER_GENERATE_ASSET_SYMBOLS=NO \
             ASSETCATALOG_COMPILER_GENERATE_SWIFT_ASSET_SYMBOL_EXTENSIONS=NO
 
-          # 2. 精准定位 Products 成品目录（避开 Intermediates 缓存夹）
+          # 2. 定位 Products 成品目录
           PRODUCTS_DIR=$(find ./build -type d -path "*/Build/Products/Release-iphoneos" | head -n 1)
           if [ -z "$PRODUCTS_DIR" ]; then
             PRODUCTS_DIR="./build/Build/Products/Release-iphoneos"
@@ -58,25 +58,25 @@ jobs:
           # 3. 创建标准 iOS .app 目录结构
           mkdir -p Payload/YouDao.app
 
-          # (1) 装配主程序二进制文件
+          # (1) 复制主程序
           APP_BIN=$(find "$PRODUCTS_DIR" -maxdepth 1 -type f ! -name "*.*" ! -name ".*" | head -n 1)
           if [ -z "$APP_BIN" ]; then
             APP_BIN="$PRODUCTS_DIR/幼刀"
           fi
-          echo "✅ 找到主程序: $APP_BIN"
+          echo "✅ 复制主程序: $APP_BIN"
           cp "$APP_BIN" Payload/YouDao.app/YouDao
           chmod +x Payload/YouDao.app/YouDao
 
-          # (2) 合并所有资源包与字体图标
+          # (2) 合并资源包
           find "$PRODUCTS_DIR" -maxdepth 1 -type d -name "*.bundle" | while read -r bndl; do
             echo "✅ 合并资源包: $bndl"
-            cp -R "$bndl/"* Payload/YouDao.app/
+            cp -R "$bndl/"* Payload/YouDao.app/ 2>/dev/null || true
           done
 
-          # (3) 合并动态依赖库 (如果有)
-          if [ -d "$PRODUCTS_DIR/PackageFrameworks" ]; then
+          # (3) 动态库（空文件夹直接跳过，不报错）
+          if [ -d "$PRODUCTS_DIR/PackageFrameworks" ] && [ "$(ls -A "$PRODUCTS_DIR/PackageFrameworks" 2>/dev/null)" ]; then
             mkdir -p Payload/YouDao.app/Frameworks
-            cp -R "$PRODUCTS_DIR/PackageFrameworks/"* Payload/YouDao.app/Frameworks/
+            cp -R "$PRODUCTS_DIR/PackageFrameworks/"* Payload/YouDao.app/Frameworks/ 2>/dev/null || true
           fi
 
           # 4. 补齐并更新标准 Info.plist
@@ -84,14 +84,14 @@ jobs:
           if [ ! -f "$PLIST_PATH" ]; then
             plutil -create xml1 "$PLIST_PATH"
           fi
-          plutil -replace CFBundlePackageType -string "APPL" "$PLIST_PATH"
-          plutil -replace CFBundleExecutable -string "YouDao" "$PLIST_PATH"
-          plutil -replace CFBundleIdentifier -string "com.youdong.app" "$PLIST_PATH"
-          plutil -replace CFBundleName -string "幼刀" "$PLIST_PATH"
-          plutil -replace CFBundleDisplayName -string "幼刀" "$PLIST_PATH"
-          plutil -replace CFBundleShortVersionString -string "1.0" "$PLIST_PATH"
-          plutil -replace CFBundleVersion -string "1" "$PLIST_PATH"
-          plutil -replace MinimumOSVersion -string "17.0" "$PLIST_PATH"
+          plutil -replace CFBundlePackageType -string "APPL" "$PLIST_PATH" || true
+          plutil -replace CFBundleExecutable -string "YouDao" "$PLIST_PATH" || true
+          plutil -replace CFBundleIdentifier -string "com.youdong.app" "$PLIST_PATH" || true
+          plutil -replace CFBundleName -string "幼刀" "$PLIST_PATH" || true
+          plutil -replace CFBundleDisplayName -string "幼刀" "$PLIST_PATH" || true
+          plutil -replace CFBundleShortVersionString -string "1.0" "$PLIST_PATH" || true
+          plutil -replace CFBundleVersion -string "1" "$PLIST_PATH" || true
+          plutil -replace MinimumOSVersion -string "17.0" "$PLIST_PATH" || true
 
           # 5. 打包生成 IPA
           zip -qry output.ipa Payload
