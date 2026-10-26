@@ -1,0 +1,87 @@
+name: Build IPA (Direct Release)
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: macos-15
+    permissions:
+      contents: write 
+
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@v4
+
+      - name: 确认 Xcode 16 环境
+        run: |
+          xcodebuild -version
+
+      - name: 规整工程目录
+        run: |
+          find . -maxdepth 2 -iname "*.zip" -exec unzip -o -q "{}" \;
+          TARGET_DIR=$(find . -name "Package.swift" -not -path "*/.*" -exec dirname {} \; | head -n 1)
+          if [ -z "$TARGET_DIR" ]; then
+            echo "❌ 未找到 Package.swift 目录"
+            exit 1
+          fi
+          rm -rf AppSource
+          mv "$TARGET_DIR" AppSource
+          find AppSource -name "Assets.xcassets" | tail -n +2 | while read -r dup; do rm -rf "$dup"; done
+
+      - name: 执行编译并捕获日志
+        run: |
+          cd AppSource
+          SCHEME=$(xcodebuild -list 2>/dev/null | awk '/Schemes:/{flag=1;next} flag && NF{print $1; exit}')
+          if [ -z "$SCHEME" ]; then SCHEME="AppModule"; fi
+          echo "正在构建 Scheme: $SCHEME"
+
+          set +e
+          xcodebuild build \
+            -scheme "$SCHEME" \
+            -destination "generic/platform=iOS" \
+            -configuration Release \
+            -derivedDataPath ./build \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGN_IDENTITY="" \
+            ASSETCATALOG_COMPILER_GENERATE_ASSET_SYMBOLS=NO \
+            ASSETCATALOG_COMPILER_GENERATE_SWIFT_ASSET_SYMBOL_EXTENSIONS=NO > build.log 2>&1
+          
+          BUILD_STATUS=$?
+          if [ $BUILD_STATUS -ne 0 ]; then
+            echo "==================== [ 核心错误精准定位 ] ===================="
+            grep -E "error:" build.log | grep -v "ResultBundle" | head -n 30
+            echo "=============================================================="
+            echo "---- 报错附近上下文 ----"
+            tail -n 40 build.log
+            exit $BUILD_STATUS
+          fi
+          set -e
+
+          mkdir -p Payload
+          APP_PATH=$(find ./build -name "*.app" | head -n 1)
+          if [ -z "$APP_PATH" ]; then
+            echo "❌ 未找到编译生成的 .app"
+            exit 1
+          fi
+          cp -r "$APP_PATH" Payload/
+
+          PLIST_PATH=$(find Payload -name "Info.plist" | head -n 1)
+          if [ -f "$PLIST_PATH" ]; then
+            plutil -replace CFBundleIdentifier -string "com.youdong.app" "$PLIST_PATH"
+            plutil -replace CFBundleName -string "幼刀" "$PLIST_PATH" || true
+            plutil -replace CFBundleDisplayName -string "幼刀" "$PLIST_PATH" || true
+          fi
+
+          zip -qry output.ipa Payload
+          mv output.ipa "$GITHUB_WORKSPACE/YouDao.ipa"
+          echo "🎉 打包完成"
+
+      - name: 发布 Release 并提供 IPA 下载
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: "v1.0.${{ github.run_number }}"
+          name: "幼刀 直装版 IPA (Build ${{ github.run_number }})"
+          files: YouDao.ipa
+          token: ${{ secrets.GITHUB_TOKEN }}
